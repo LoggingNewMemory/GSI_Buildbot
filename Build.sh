@@ -216,10 +216,10 @@ build_gsi() {
     
     # GSI targets based on TrebleDroid conventions
     local targets=(
-        "treble_arm64_bvN"  # ARM64 A/B vanilla
+        # "treble_arm64_bvN"  # ARM64 A/B vanilla
         "treble_arm64_bgN"  # ARM64 A/B GApps
-        "treble_a64_bvN"    # ARM32/64 A/B vanilla
-        "treble_a64_bgN"    # ARM32/64 A/B GApps
+        # "treble_a64_bvN"    # ARM32/64 A/B vanilla
+        # "treble_a64_bgN"    # ARM32/64 A/B GApps
     )
     
     for target in "${targets[@]}"; do
