@@ -28,6 +28,7 @@ BUILD_THREADS="${BUILD_THREADS:-$(nproc --all)}"
 
 # Functions
 log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
     echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
 }
 
