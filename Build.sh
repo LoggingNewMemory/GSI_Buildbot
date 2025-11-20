@@ -1,7 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # AxionOS GSI Build Bot with Auto Upload
 # This script builds GSI with TrebleDroid patches, overlays, and Treble app
+# Usage: bash ./Build.sh
 
 set -e
 
@@ -13,15 +14,17 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROM_NAME="AxionOS"
-WORK_DIR="$HOME/gsi-build"
+WORK_DIR="${WORK_DIR:-$HOME/gsi-build}"
 SOURCE_DIR="$WORK_DIR/axion"
 OUTPUT_DIR="$WORK_DIR/output"
 TREBLE_DIR="$WORK_DIR/treble"
 LOG_FILE="$WORK_DIR/build_$(date +%Y%m%d_%H%M%S).log"
 
 # Build configuration
-BUILD_VARIANT="va"  # va = vanilla, gms core, gms pico
+BUILD_VARIANT="${BUILD_VARIANT:-va}"  # va = vanilla, gms core, gms pico
+BUILD_THREADS="${BUILD_THREADS:-$(nproc --all)}"
 
 # Functions
 log() {
@@ -216,10 +219,10 @@ build_gsi() {
     
     # GSI targets based on TrebleDroid conventions
     local targets=(
-        # "treble_arm64_bvN"  # ARM64 A/B vanilla
+        "treble_arm64_bvN"  # ARM64 A/B vanilla
         "treble_arm64_bgN"  # ARM64 A/B GApps
-        # "treble_a64_bvN"    # ARM32/64 A/B vanilla
-        # "treble_a64_bgN"    # ARM32/64 A/B GApps
+        "treble_a64_bvN"    # ARM32/64 A/B vanilla
+        "treble_a64_bgN"    # ARM32/64 A/B GApps
     )
     
     for target in "${targets[@]}"; do
@@ -321,7 +324,18 @@ EOF
 
 # Main execution
 main() {
+    echo ""
+    echo "╔════════════════════════════════════════════════════════╗"
+    echo "║         AxionOS GSI Build Bot with Auto Upload        ║"
+    echo "╚════════════════════════════════════════════════════════╝"
+    echo ""
+    
     log "=== AxionOS GSI Build Bot Started ==="
+    log "Script directory: $SCRIPT_DIR"
+    log "Working directory: $WORK_DIR"
+    log "Build threads: $BUILD_THREADS"
+    log "Build variant: $BUILD_VARIANT"
+    echo ""
     
     check_dependencies
     setup_dirs
@@ -337,12 +351,17 @@ main() {
     generate_info
     upload_to_gofile
     
+    echo ""
     log "=== Build process completed! ==="
     log "Output directory: $OUTPUT_DIR"
     log "Build log: $LOG_FILE"
-    
+    echo ""
     info "Check GoFile links above for download URLs"
+    echo ""
 }
+
+# Trap errors
+trap 'error "Script failed at line $LINENO"' ERR
 
 # Run main function
 main "$@"
