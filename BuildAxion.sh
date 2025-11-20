@@ -99,7 +99,8 @@ clone_treble() {
         git pull
         cd ..
     else
-        git clone https://github.com/TrebleDroid/device_phh_treble device_phh_treble
+        # Removed explicit directory argument; git will create 'device_phh_treble' automatically
+        git clone https://github.com/TrebleDroid/device_phh_treble
     fi
     
     if [ -d "treble_app" ]; then
