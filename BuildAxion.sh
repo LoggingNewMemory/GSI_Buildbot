@@ -84,14 +84,29 @@ clone_treble() {
     log "Cloning Treble repos..."
     cd "$TREBLE_DIR"
     
-    # FIX: Always remove old patches folder to avoid 'patches/patches/' directory nesting errors
+    # FIX: Remove old directory to start clean
     if [ -d "patches" ]; then
-        info "Removing old patches directory to ensure clean structure..."
         rm -rf patches
     fi
 
-    info "Cloning patches (Clean)..."
+    info "Cloning patches..."
     git clone https://github.com/Doze-off/patches
+
+    # FIX: Enforce nested directory structure /patches/patches/
+    # The script needs 'apply-patches.sh' in the root, but the patches inside a 'patches' subdir.
+    if [ -d "patches" ]; then
+        info "Restructuring patches folder to match requirements..."
+        cd patches
+        mkdir -p patches
+        
+        # Move standard patch folders into the nested 'patches' directory
+        # We use '|| true' to prevent failure if a specific folder doesn't exist
+        mv platform_* patches/ 2>/dev/null || true
+        mv trebledroid patches/ 2>/dev/null || true
+        mv personal patches/ 2>/dev/null || true
+        
+        cd ..
+    fi
 
     if [ -d "device_phh_treble" ]; then
         cd device_phh_treble
@@ -118,8 +133,8 @@ apply_treble_patches() {
     local patch_dir="$TREBLE_DIR/patches"
     
     if [ -f "$patch_script" ]; then
-        # Ensure the script is executable
         chmod +x "$patch_script"
+        # The script will now find the patches inside $patch_dir/patches/
         bash "$patch_script" "$patch_dir"
     else
         error "apply-patches.sh not found at $patch_script"
