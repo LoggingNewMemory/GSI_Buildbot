@@ -25,6 +25,7 @@ LOG_FILE="$WORK_DIR/build_$(date +%Y%m%d_%H%M%S).log"
 # Build configuration
 BUILD_VARIANT="${BUILD_VARIANT:-va}"  # va = vanilla, gms core, gms pico
 BUILD_THREADS="${BUILD_THREADS:-$(nproc --all)}"
+SYNC_THREADS=24
 
 # Functions
 log() {
@@ -94,10 +95,10 @@ init_repo() {
 
 # Sync sources
 sync_sources() {
-    log "Syncing source code (this may take a while)..."
+    log "Syncing source code (Max threads: $SYNC_THREADS)..."
     cd "$SOURCE_DIR"
     
-    repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+    repo sync -c -j"$SYNC_THREADS" --force-sync --no-clone-bundle --no-tags
     log "Source sync completed"
 }
 
@@ -335,6 +336,7 @@ main() {
     log "Script directory: $SCRIPT_DIR"
     log "Working directory: $WORK_DIR"
     log "Build threads: $BUILD_THREADS"
+    log "Sync threads: $SYNC_THREADS"
     log "Build variant: $BUILD_VARIANT"
     echo ""
     
