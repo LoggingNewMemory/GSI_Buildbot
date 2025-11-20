@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # AxionOS GSI Build Bot with Auto Upload
-# This script builds GSI with TrebleDroid patches, overlays, and Treble app
+# This script builds GSI with Doze-off patches, Official TrebleDroid device tree, and Treble app
 # Usage: bash ./Build.sh
 
 set -e
@@ -102,21 +102,30 @@ sync_sources() {
     log "Source sync completed"
 }
 
-# Clone TrebleDroid patches
+# Clone Treble patches and device trees
 clone_treble() {
-    log "Cloning TrebleDroid repositories..."
+    log "Cloning Treble repositories..."
     cd "$TREBLE_DIR"
     
-    # Clone treble_experimentations
-    if [ ! -d "treble_experimentations" ]; then
-        git clone https://github.com/TrebleDroid/treble_experimentations
+    # Clone patches (Doze-off)
+    if [ ! -d "patches" ]; then
+        git clone https://github.com/Doze-off/patches patches
     else
-        cd treble_experimentations
+        cd patches
+        git pull
+        cd ..
+    fi
+
+    # Clone device_phh_treble (Official TrebleDroid)
+    if [ ! -d "device_phh_treble" ]; then
+        git clone https://github.com/TrebleDroid/device_phh_treble device_phh_treble
+    else
+        cd device_phh_treble
         git pull
         cd ..
     fi
     
-    # Clone treble_app
+    # Clone treble_app (Standard TrebleDroid)
     if [ ! -d "treble_app" ]; then
         git clone https://github.com/TrebleDroid/treble_app
     else
@@ -125,23 +134,26 @@ clone_treble() {
         cd ..
     fi
     
-    log "TrebleDroid repositories cloned"
+    log "Treble repositories cloned"
 }
 
-# Apply TrebleDroid patches
+# Apply Treble patches
 apply_treble_patches() {
-    log "Applying TrebleDroid patches..."
+    log "Applying Treble patches from Doze-off..."
     cd "$SOURCE_DIR"
     
-    # Apply patches from TrebleDroid
-    bash "$TREBLE_DIR/treble_experimentations/apply-patches.sh" "$TREBLE_DIR/treble_experimentations"
-    
-    log "TrebleDroid patches applied successfully"
+    # Apply patches
+    if [ -f "$TREBLE_DIR/patches/apply-patches.sh" ]; then
+        bash "$TREBLE_DIR/patches/apply-patches.sh" "$TREBLE_DIR/patches"
+        log "Treble patches applied successfully"
+    else
+        error "apply-patches.sh not found in patches directory!"
+    fi
 }
 
 # Add Treble app to vendor
 add_treble_app() {
-    log "Adding TrebleDroid app to vendor..."
+    log "Adding Treble app to vendor..."
     
     local treble_app_dir="$SOURCE_DIR/vendor/hardware_overlay/TrebleApp"
     mkdir -p "$treble_app_dir"
@@ -149,27 +161,30 @@ add_treble_app() {
     # Copy treble_app to vendor
     cp -r "$TREBLE_DIR/treble_app/"* "$treble_app_dir/"
     
-    info "TrebleDroid app added to vendor"
+    info "Treble app added to vendor"
 }
 
 # Setup GSI device tree
 setup_gsi_device() {
-    log "Setting up GSI device configurations..."
+    log "Setting up GSI device configurations (Official TrebleDroid)..."
     cd "$SOURCE_DIR"
     
-    # Create device tree for GSI builds if needed
+    # Create device tree for GSI builds
     local device_dir="$SOURCE_DIR/device/phh/treble"
     
     if [ ! -d "$device_dir" ]; then
         mkdir -p "$device_dir"
         
-        # Link or copy TrebleDroid device tree
-        if [ -d "$TREBLE_DIR/treble_experimentations/device/phh/treble" ]; then
-            cp -r "$TREBLE_DIR/treble_experimentations/device/phh/treble/"* "$device_dir/"
+        # Copy Official TrebleDroid device tree
+        if [ -d "$TREBLE_DIR/device_phh_treble" ]; then
+            cp -r "$TREBLE_DIR/device_phh_treble/"* "$device_dir/"
+            info "GSI device tree configured from Official TrebleDroid source"
+        else
+            error "Device tree not found in $TREBLE_DIR/device_phh_treble"
         fi
+    else
+        info "Device tree directory already exists, skipping copy"
     fi
-    
-    info "GSI device tree configured"
 }
 
 # Configure build environment
@@ -219,12 +234,12 @@ build_gsi_target() {
 build_gsi() {
     log "Starting GSI build process..."
     
-    # GSI targets based on TrebleDroid conventions
+    # GSI targets
     local targets=(
-        "treble_arm64_bvN"  # ARM64 A/B vanilla
+        # "treble_arm64_bvN"  # ARM64 A/B vanilla
         "treble_arm64_bgN"  # ARM64 A/B GApps
-        "treble_a64_bvN"    # ARM32/64 A/B vanilla
-        "treble_a64_bgN"    # ARM32/64 A/B GApps
+        # "treble_a64_bvN"    # ARM32/64 A/B vanilla
+        # "treble_a64_bgN"    # ARM32/64 A/B GApps
     )
     
     for target in "${targets[@]}"; do
@@ -297,12 +312,14 @@ $(ls -1 "$OUTPUT_DIR"/*.xz 2>/dev/null | xargs -n1 basename || echo "No builds f
 
 Build Log: $LOG_FILE
 
-TrebleDroid Components:
-- Patches: https://github.com/TrebleDroid/treble_experimentations
+Components:
+- Patches: https://github.com/Doze-off/patches
+- Device Tree: https://github.com/TrebleDroid/device_phh_treble
 - App: https://github.com/TrebleDroid/treble_app
 
 Notes:
-- All variants include TrebleDroid patches and app
+- All variants include Doze-off patches and TrebleApp
+- Device tree provided by Official TrebleDroid
 - Built on AxionOS (LineageOS 23.0 base)
 - Compressed with XZ for optimal size
 - Uploaded to GoFile for easy distribution
