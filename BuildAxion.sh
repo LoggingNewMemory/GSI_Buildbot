@@ -16,7 +16,8 @@ NC='\033[0m'
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROM_NAME="AxionOS"
-WORK_DIR="${WORK_DIR:-$HOME/gsi-build}"
+# FIX: Set WORK_DIR to SCRIPT_DIR so everything stays inside the bot folder
+WORK_DIR="${WORK_DIR:-$SCRIPT_DIR}"
 SOURCE_DIR="$WORK_DIR/axion"
 OUTPUT_DIR="$WORK_DIR/output"
 TREBLE_DIR="$WORK_DIR/treble"
@@ -108,6 +109,7 @@ clone_treble() {
     cd "$TREBLE_DIR"
     
     # Clone patches (Doze-off)
+    # FIX: Ensure we don't create nested patches/patches
     if [ ! -d "patches" ]; then
         git clone https://github.com/Doze-off/patches patches
     else
@@ -143,11 +145,14 @@ apply_treble_patches() {
     cd "$SOURCE_DIR"
     
     # Apply patches
-    if [ -f "$TREBLE_DIR/patches/apply-patches.sh" ]; then
-        bash "$TREBLE_DIR/patches/apply-patches.sh" "$TREBLE_DIR/patches"
+    local patch_script="$TREBLE_DIR/patches/apply-patches.sh"
+    local patch_dir="$TREBLE_DIR/patches"
+    
+    if [ -f "$patch_script" ]; then
+        bash "$patch_script" "$patch_dir"
         log "Treble patches applied successfully"
     else
-        error "apply-patches.sh not found in patches directory!"
+        error "apply-patches.sh not found in $patch_dir!"
     fi
 }
 
