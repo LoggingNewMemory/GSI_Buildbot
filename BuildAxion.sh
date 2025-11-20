@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# AxionOS GSI Build Bot
+# Usage: bash ./Build.sh
+
 set -e
 
 # Colors
@@ -81,31 +84,30 @@ clone_treble() {
     log "Cloning Treble repos..."
     cd "$TREBLE_DIR"
     
-    # Patches
-    if [ ! -d "patches" ]; then
-        git clone https://github.com/Doze-off/patches patches
-    else
+    if [ -d "patches" ]; then
+        info "Patches folder exists, updating..."
         cd patches
         git pull
         cd ..
+    else
+        info "Cloning patches..."
+        git clone https://github.com/Doze-off/patches
     fi
 
-    # Device Tree
-    if [ ! -d "device_phh_treble" ]; then
-        git clone https://github.com/TrebleDroid/device_phh_treble device_phh_treble
-    else
+    if [ -d "device_phh_treble" ]; then
         cd device_phh_treble
         git pull
         cd ..
+    else
+        git clone https://github.com/TrebleDroid/device_phh_treble device_phh_treble
     fi
     
-    # Treble App
-    if [ ! -d "treble_app" ]; then
-        git clone https://github.com/TrebleDroid/treble_app
-    else
+    if [ -d "treble_app" ]; then
         cd treble_app
         git pull
         cd ..
+    else
+        git clone https://github.com/TrebleDroid/treble_app
     fi
 }
 
@@ -119,7 +121,7 @@ apply_treble_patches() {
     if [ -f "$patch_script" ]; then
         bash "$patch_script" "$patch_dir"
     else
-        error "apply-patches.sh not found!"
+        error "apply-patches.sh not found at $patch_script"
     fi
 }
 
