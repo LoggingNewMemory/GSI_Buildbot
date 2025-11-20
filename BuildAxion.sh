@@ -84,22 +84,20 @@ clone_treble() {
     log "Cloning Treble repos..."
     cd "$TREBLE_DIR"
     
+    # FIX: Always remove old patches folder to avoid 'patches/patches/' directory nesting errors
     if [ -d "patches" ]; then
-        info "Patches folder exists, updating..."
-        cd patches
-        git pull
-        cd ..
-    else
-        info "Cloning patches..."
-        git clone https://github.com/Doze-off/patches
+        info "Removing old patches directory to ensure clean structure..."
+        rm -rf patches
     fi
+
+    info "Cloning patches (Clean)..."
+    git clone https://github.com/Doze-off/patches
 
     if [ -d "device_phh_treble" ]; then
         cd device_phh_treble
         git pull
         cd ..
     else
-        # Removed explicit directory argument; git will create 'device_phh_treble' automatically
         git clone https://github.com/TrebleDroid/device_phh_treble
     fi
     
@@ -120,6 +118,8 @@ apply_treble_patches() {
     local patch_dir="$TREBLE_DIR/patches"
     
     if [ -f "$patch_script" ]; then
+        # Ensure the script is executable
+        chmod +x "$patch_script"
         bash "$patch_script" "$patch_dir"
     else
         error "apply-patches.sh not found at $patch_script"
