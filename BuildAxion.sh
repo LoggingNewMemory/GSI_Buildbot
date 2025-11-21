@@ -1,255 +1,234 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-# AxionOS GSI Build Bot
-# Usage: bash ./Build.sh
+rom_fp="$(date +%y%m%d)"
+
+originFolder="$(dirname "$(readlink -f -- "$0")")"
+
+mkdir -p release/$rom_fp/
 
 set -e
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+if [ -z "$USER" ];then
+export USER="$(id -un)"
+fi
 
-# Configuration
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROM_NAME="AxionOS"
-WORK_DIR="$SCRIPT_DIR"
-SOURCE_DIR="$WORK_DIR/axion"
-OUTPUT_DIR="$WORK_DIR/output"
-TREBLE_DIR="$WORK_DIR/treble"
-LOG_FILE="$WORK_DIR/build_$(date +%Y%m%d_%H%M%S).log"
+export LC_ALL=C
 
-# Build config
-BUILD_VARIANT="${BUILD_VARIANT:-va}"
-BUILD_THREADS="${BUILD_THREADS:-$(nproc --all)}"
-SYNC_THREADS=24
+# AxionOS manifest configuration - HARDCODED TO ANDROID 16
+manifest_url="https://github.com/AxionAOSP/android.git"
+axion_branch="lineage-23.0"
+aosp_base="android-16.0"
+phh_branch="android-16.0"
+supp="-bp2a"
 
-log() {
-    mkdir -p "$(dirname "$LOG_FILE")"
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
+echo "========================================"
+echo "  AxionOS Android 16 ARM64 GSI Build Bot"
+echo "========================================"
+echo "Build date: $rom_fp"
+echo "Branch: $axion_branch (Android 16)"
+echo "Architecture: ARM64 ONLY"
+echo "Security Patch: CURRENT ONLY"
+echo "Root: NO ROOT (N variants)"
+echo "========================================"
+
+# Download GoFile upload script if not present
+if [ ! -f upload.sh ]; then
+echo "Downloading GoFile upload script..."
+wget -q https://raw.githubusercontent.com/Sushrut1101/GoFile-Upload/refs/heads/master/upload.sh && chmod +x upload.sh
+fi
+
+# Initialize AxionOS repo
+echo "Initializing AxionOS Android 16 repository..."
+repo init -u "$manifest_url" -b $axion_branch --git-lfs --depth=1
+
+# Clone TrebleDroid manifest for GSI support
+echo "Setting up TrebleDroid manifests..."
+if [ -d .repo/local_manifests ] ;then
+( cd .repo/local_manifests; git fetch; git reset --hard; git checkout origin/$phh_branch 2>/dev/null || git checkout origin/android-15.0)
+else
+git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b $phh_branch 2>/dev/null || \
+git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b android-15.0
+fi
+
+echo "Syncing repositories..."
+repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags || repo sync -c -j1 --force-sync
+
+# Clone TrebleDroid patches if not present
+if [ ! -d patches ]; then
+echo "Cloning TrebleDroid patches..."
+git clone https://github.com/ponces/treble_aosp patches_repo -b $phh_branch 2>/dev/null || \
+git clone https://github.com/ponces/treble_aosp patches_repo -b android-15.0
+if [ -d patches_repo/patches ]; then
+cp -r patches_repo/patches .
+fi
+fi
+
+# Apply TrebleDroid patches
+if [ -d patches ]; then
+echo "Applying TrebleDroid patches..."
+if [ -f patches/apply-patches.sh ]; then
+bash patches/apply-patches.sh . trebledroid 2>/dev/null || echo "Some patches may have failed, continuing..."
+# Apply additional patch sets if they exist
+for patch_dir in ponces personal; do
+if [ -d patches/$patch_dir ]; then
+echo "Applying $patch_dir patches..."
+bash patches/apply-patches.sh . $patch_dir 2>/dev/null || echo "Some $patch_dir patches may have failed, continuing..."
+fi
+done
+else
+echo "No apply-patches.sh script found, skipping automatic patching"
+fi
+fi
+
+# Generate Treble device configurations
+echo "Generating Treble device configurations..."
+(cd device/phh/treble; git clean -fdx; bash generate.sh)
+
+# Build Treble app
+echo "Building Treble app..."
+if [ -d packages/apps/TrebleApp ]; then
+(cd packages/apps/TrebleApp; ./gradlew assembleRelease 2>/dev/null || echo "Treble app build failed, continuing...")
+fi
+
+. build/envsetup.sh
+
+# Enable ccache for faster builds
+export USE_CCACHE=1
+export CCACHE_COMPRESS=1
+export CCACHE_MAXSIZE=50G
+ccache -M 50G -F 0 2>/dev/null || true
+
+# Array to store built files
+declare -a BUILT_FILES=()
+
+# Function to upload file to GoFile
+uploadToGoFile() {
+local file="$1"
+if [ -f "$file" ]; then
+echo "Uploading $file to GoFile..."
+./upload.sh "$file"
+else
+echo "File $file not found, skipping upload."
+fi
 }
 
-error() {
-    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE"
-    exit 1
+buildVariant() {
+local lunch_target=$1
+local output_name=$2
+local build_gapps=$3
+
+echo ""
+echo "========================================"
+echo "Building: $output_name"
+echo "Target: $lunch_target"
+echo "GApps: $build_gapps"
+echo "========================================"
+
+lunch $lunch_target
+make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp installclean
+
+# Set GApps flag if building GApps variant
+if [ "$build_gapps" = "true" ]; then
+echo "Building with GApps..."
+make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp TARGET_BUILD_GAPPS=true -j$(nproc) systemimage
+else
+echo "Building Vanilla variant..."
+make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp -j$(nproc) systemimage
+fi
+
+make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp vndk-test-sepolicy
+
+local output_file="release/$rom_fp/system-axion-${output_name}.img.xz"
+echo "Compressing system image..."
+xz -c $OUT/system.img -T0 > "$output_file"
+
+echo "Build completed: $output_name"
+# Store the file path for later upload selection
+BUILT_FILES+=("$output_file")
 }
 
-warn() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
-}
+repo manifest -r > release/$rom_fp/manifest.xml
 
-info() {
-    echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"
-}
+# Copy patches if list-patches.sh exists
+if [ -f "$originFolder/list-patches.sh" ]; then
+bash "$originFolder"/list-patches.sh
+if [ -f patches.zip ]; then
+cp patches.zip release/$rom_fp/patches-for-developers.zip 2>/dev/null || true
+BUILT_FILES+=("release/$rom_fp/patches-for-developers.zip")
+fi
+fi
 
-check_dependencies() {
-    log "Checking dependencies..."
-    local deps=("git" "wget" "curl" "repo" "python3")
-    for dep in "${deps[@]}"; do
-        if ! command -v "$dep" &> /dev/null; then
-            error "$dep is not installed."
-        fi
-    done
-}
+# Build Android 16 ARM64 GSI variants (current security patch, NO ROOT)
+echo ""
+echo "========================================"
+echo "Building Android 16 ARM64 GSI Variants"
+echo "========================================"
 
-setup_dirs() {
-    mkdir -p "$WORK_DIR" "$SOURCE_DIR" "$OUTPUT_DIR" "$TREBLE_DIR"
-}
+# ARM64 Vanilla NO ROOT (bvN - current security patch)
+buildVariant treble_arm64_bvN$supp-userdebug arm64-vanilla false
 
-setup_gofile() {
-    cd "$WORK_DIR"
-    if [ ! -f "upload.sh" ]; then
-        wget -q https://raw.githubusercontent.com/Sushrut1101/GoFile-Upload/refs/heads/master/upload.sh
-        chmod +x upload.sh
-    fi
-}
+# ARM64 GApps NO ROOT (bgN - current security patch)
+buildVariant treble_arm64_bgN$supp-userdebug arm64-gapps true
 
-init_repo() {
-    log "Initializing AxionOS..."
-    cd "$SOURCE_DIR"
-    if [ ! -d ".repo" ]; then
-        repo init -u https://github.com/AxionAOSP/android.git -b lineage-23.0 --git-lfs
-    fi
-}
+# Add manifest to built files
+BUILT_FILES+=("release/$rom_fp/manifest.xml")
 
-sync_sources() {
-    log "Syncing source..."
-    cd "$SOURCE_DIR"
-    repo sync -c -j"$SYNC_THREADS" --force-sync --no-clone-bundle --no-tags
-}
+echo ""
+echo "========================================"
+echo "  Build Complete!"
+echo "========================================"
+echo "Built variants:"
+echo "  ✓ arm64-vanilla (bvN - NO ROOT)"
+echo "  ✓ arm64-gapps (bgN - NO ROOT)"
+echo ""
+echo "========================================"
+echo "  Select Files to Upload to GoFile"
+echo "========================================"
 
-clone_treble() {
-    log "Cloning Treble repos..."
-    cd "$TREBLE_DIR"
-    
-    # FIX: Remove old directory to start clean
-    if [ -d "patches" ]; then
-        rm -rf patches
-    fi
+# Interactive upload selection
+for i in "${!BUILT_FILES[@]}"; do
+file="${BUILT_FILES[$i]}"
+filename=$(basename "$file")
+filesize=$(du -h "$file" 2>/dev/null | cut -f1 || echo "N/A")
+echo "[$((i+1))] $filename ($filesize)"
+done
 
-    info "Cloning patches..."
-    git clone https://github.com/Doze-off/patches
+echo ""
+echo "Options:"
+echo "  [a] Upload all files"
+echo "  [n] Upload none (skip upload)"
+echo "  [1-${#BUILT_FILES[@]}] Upload specific file numbers (space-separated)"
+echo ""
+read -p "Enter your choice: " choice
 
-    # FIX: Enforce nested directory structure /patches/patches/
-    # The script needs 'apply-patches.sh' in the root, but the patches inside a 'patches' subdir.
-    if [ -d "patches" ]; then
-        info "Restructuring patches folder to match requirements..."
-        cd patches
-        mkdir -p patches
-        
-        # Move standard patch folders into the nested 'patches' directory
-        # We use '|| true' to prevent failure if a specific folder doesn't exist
-        mv platform_* patches/ 2>/dev/null || true
-        mv trebledroid patches/ 2>/dev/null || true
-        mv personal patches/ 2>/dev/null || true
-        
-        cd ..
-    fi
-
-    if [ -d "device_phh_treble" ]; then
-        cd device_phh_treble
-        git pull
-        cd ..
-    else
-        git clone https://github.com/TrebleDroid/device_phh_treble
-    fi
-    
-    if [ -d "treble_app" ]; then
-        cd treble_app
-        git pull
-        cd ..
-    else
-        git clone https://github.com/TrebleDroid/treble_app
-    fi
-}
-
-apply_treble_patches() {
-    log "Applying patches..."
-    cd "$SOURCE_DIR"
-    
-    local patch_script="$TREBLE_DIR/patches/apply-patches.sh"
-    local patch_dir="$TREBLE_DIR/patches"
-    
-    if [ -f "$patch_script" ]; then
-        chmod +x "$patch_script"
-        # The script will now find the patches inside $patch_dir/patches/
-        bash "$patch_script" "$patch_dir"
-    else
-        error "apply-patches.sh not found at $patch_script"
-    fi
-}
-
-add_treble_app() {
-    local treble_app_dir="$SOURCE_DIR/vendor/hardware_overlay/TrebleApp"
-    mkdir -p "$treble_app_dir"
-    cp -r "$TREBLE_DIR/treble_app/"* "$treble_app_dir/"
-}
-
-setup_gsi_device() {
-    cd "$SOURCE_DIR"
-    local device_dir="$SOURCE_DIR/device/phh/treble"
-    
-    if [ ! -d "$device_dir" ]; then
-        mkdir -p "$device_dir"
-        if [ -d "$TREBLE_DIR/device_phh_treble" ]; then
-            cp -r "$TREBLE_DIR/device_phh_treble/"* "$device_dir/"
-        fi
-    fi
-}
-
-configure_build() {
-    cd "$SOURCE_DIR"
-    source build/envsetup.sh
-    if command -v gk &> /dev/null; then
-        gk -s
-    fi
-}
-
-build_gsi_target() {
-    local target=$1
-    local variant=$2
-    
-    log "Building $target ($variant)..."
-    cd "$SOURCE_DIR"
-    source build/envsetup.sh
-    
-    axion "$target" "$variant" || lunch "lineage_${target}-userdebug"
-    ax -br -j$(nproc --all) 2>&1 | tee -a "$LOG_FILE" || make systemimage -j$(nproc --all) 2>&1 | tee -a "$LOG_FILE"
-    
-    if [ $? -eq 0 ]; then
-        return 0
-    else
-        return 1
-    fi
-}
-
-build_gsi() {
-    local targets=("treble_arm64_bgN")
-    
-    for target in "${targets[@]}"; do
-        local axion_variant="va"
-        if [[ "$target" == *"bg"* ]]; then
-            axion_variant="gms core"
-        fi
-        
-        cd "$SOURCE_DIR"
-        make installclean || true
-        
-        if build_gsi_target "$target" "$axion_variant"; then
-            local img_name="${ROM_NAME}-${target}-$(date +%Y%m%d).img"
-            local system_img=$(find "$SOURCE_DIR/out/target/product" -name "system.img" -o -name "system_ext.img" | head -n1)
-            
-            if [ -f "$system_img" ]; then
-                cp "$system_img" "$OUTPUT_DIR/$img_name"
-                cd "$OUTPUT_DIR"
-                xz -9 -T$(nproc --all) "$img_name"
-                log "Saved: $img_name.xz"
+case "$choice" in
+    a|A)
+        echo ""
+        echo "Uploading all files to GoFile..."
+        for file in "${BUILT_FILES[@]}"; do
+            uploadToGoFile "$file"
+        done
+        ;;
+    n|N)
+        echo ""
+        echo "Skipping upload. Files saved locally in: release/$rom_fp/"
+        ;;
+    *)
+        echo ""
+        echo "Uploading selected files..."
+        for num in $choice; do
+            if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "${#BUILT_FILES[@]}" ]; then
+                uploadToGoFile "${BUILT_FILES[$((num-1))]}"
+            else
+                echo "Invalid selection: $num (skipped)"
             fi
-        fi
-    done
-}
+        done
+        ;;
+esac
 
-upload_to_gofile() {
-    log "Uploading..."
-    cd "$OUTPUT_DIR"
-    for file in *.xz; do
-        if [ -f "$file" ]; then
-            "$WORK_DIR/upload.sh" "$file" | tee -a "$LOG_FILE"
-        fi
-    done
-}
-
-generate_info() {
-    cat > "$OUTPUT_DIR/BUILD_INFO.txt" << EOF
-AxionOS GSI Build
-Date: $(date)
-ROM: $ROM_NAME
-EOF
-}
-
-main() {
-    log "=== AxionOS GSI Build Bot ==="
-    log "Work Dir: $WORK_DIR"
-    
-    check_dependencies
-    setup_dirs
-    setup_gofile
-    init_repo
-    sync_sources
-    clone_treble
-    apply_treble_patches
-    add_treble_app
-    setup_gsi_device
-    configure_build
-    build_gsi
-    generate_info
-    upload_to_gofile
-    
-    log "Done. Output: $OUTPUT_DIR"
-}
-
-trap 'error "Failed at line $LINENO"' ERR
-
-main "$@"
+echo ""
+echo "========================================"
+echo "  All Tasks Complete!"
+echo "========================================"
+echo "Local files saved in: release/$rom_fp/"
+echo "========================================"
