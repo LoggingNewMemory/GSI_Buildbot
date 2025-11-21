@@ -50,8 +50,8 @@ git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -
 git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b android-15.0
 fi
 
-echo "Syncing repositories..."
-repo sync -c -j$(nproc) --force-sync --no-clone-bundle --no-tags || repo sync -c -j1 --force-sync
+echo "Syncing repositories (jobs limited to 24)..."
+repo sync -c -j24 --force-sync --no-clone-bundle --no-tags
 
 # Clone TrebleDroid patches if not present
 if [ ! -d patches ]; then
@@ -130,10 +130,10 @@ make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp installclean
 # Set GApps flag if building GApps variant
 if [ "$build_gapps" = "true" ]; then
 echo "Building with GApps..."
-make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp TARGET_BUILD_GAPPS=true -j$(nproc) systemimage
+make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp TARGET_BUILD_GAPPS=true -j24 systemimage
 else
 echo "Building Vanilla variant..."
-make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp -j$(nproc) systemimage
+make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp -j24 systemimage
 fi
 
 make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$rom_fp vndk-test-sepolicy
