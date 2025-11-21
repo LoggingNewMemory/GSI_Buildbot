@@ -19,22 +19,25 @@ declare -a BUILT_FILES=()
 
 initRepos() {
     echo "--> Initializing AxionOS Android 16 workspace"
+    
+    # Remove problematic .repo if it exists with conflicts
+    if [ -d .repo ]; then
+        echo "--> Cleaning existing .repo directory"
+        rm -rf .repo/local_manifests
+    fi
+    
     repo init -u https://github.com/AxionAOSP/android.git -b lineage-23.0 --git-lfs --depth=1
     echo
     
     echo "--> Preparing TrebleDroid local manifest"
-    if [ -d .repo/local_manifests ]; then
-        (cd .repo/local_manifests; git fetch; git reset --hard; git checkout origin/android-16.0 2>/dev/null || git checkout origin/android-15.0)
-    else
-        git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b android-16.0 2>/dev/null || \
-        git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b android-15.0
-    fi
+    git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b android-16.0 2>/dev/null || \
+    git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b android-15.0
     echo
 }
 
 syncRepos() {
     echo "--> Syncing repos (limited to 24 jobs)"
-    repo sync -c --force-sync --no-clone-bundle --no-tags -j24 || repo sync -c --force-sync --no-clone-bundle --no-tags -j24
+    repo sync -c --force-sync --no-clone-bundle --no-tags -j24
     echo
 }
 
