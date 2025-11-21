@@ -18,20 +18,32 @@ export BUILD_NUMBER="$(date +%y%m%d)"
 declare -a BUILT_FILES=()
 
 initRepos() {
-    echo "--> Initializing AxionOS Android 16 workspace"
+    echo "--> Initializing AOSP Android 16 base workspace"
     
-    # Remove problematic .repo if it exists with conflicts
-    if [ -d .repo ]; then
-        echo "--> Cleaning existing .repo directory"
-        rm -rf .repo/local_manifests
-    fi
-    
-    repo init -u https://github.com/AxionAOSP/android.git -b lineage-23.0 --git-lfs --depth=1
+    # Use AOSP as base, then overlay AxionOS and TrebleDroid as local manifests
+    repo init -u https://android.googlesource.com/platform/manifest -b android-16.0.0_r2 --git-lfs --depth=1
     echo
     
-    echo "--> Preparing TrebleDroid local manifest"
-    git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b android-16.0 2>/dev/null || \
-    git clone https://github.com/TrebleDroid/treble_manifest .repo/local_manifests -b android-15.0
+    echo "--> Preparing local manifests directory"
+    mkdir -p .repo/local_manifests
+    
+    echo "--> Adding TrebleDroid local manifest"
+    wget -O .repo/local_manifests/treble.xml https://raw.githubusercontent.com/TrebleDroid/treble_manifest/android-16.0/replace.xml 2>/dev/null || \
+    wget -O .repo/local_manifests/treble.xml https://raw.githubusercontent.com/TrebleDroid/treble_manifest/android-15.0/replace.xml
+    
+    echo "--> Adding AxionOS local manifest"
+    cat > .repo/local_manifests/axion.xml << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="axion"
+          fetch="https://github.com/AxionAOSP"
+          revision="lineage-23.0" />
+  
+  <!-- Add AxionOS specific repos here -->
+  <project path="vendor/axion" name="vendor_axion" remote="axion" />
+  
+</manifest>
+EOF
     echo
 }
 
