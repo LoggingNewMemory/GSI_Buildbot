@@ -1,252 +1,124 @@
 #!/bin/bash
 
-echo
-echo "--------------------------------------"
-echo " AxionOS 16.0 GSI Buildbot "
-echo " Based on ponces AOSP script "
-echo "--------------------------------------"
-echo
-
 set -e
 
-export BUILD_NUMBER="$(date +%y%m%d)"
+### Configuration
+ROM_NAME="AxionOS"
+ANDROID_VERSION="android-16.0.0_r2"
+MANIFEST_URL="https://github.com/AxionAOSP/android.git"
+MANIFEST_BRANCH="lineage-23.0"
+ARCH="arm64"
+VARIANT="gapps"
+BUILD_TYPE="nosu"
 
-[ -z "$OUTPUT_DIR" ] && OUTPUT_DIR="$PWD/output"
-[ -z "$BUILD_ROOT" ] && BUILD_ROOT="$PWD"
+### Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# Array to store built files
-declare -a BUILT_FILES=()
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}AxionOS Android 16 GSI Build Script${NC}"
+echo -e "${GREEN}========================================${NC}"
 
-initRepos() {
-    echo "--> Initializing AOSP Android 16 base workspace"
-    
-    # Use AOSP as base, then overlay AxionOS and TrebleDroid as local manifests
-    repo init -u https://android.googlesource.com/platform/manifest -b android-16.0.0_r2 --git-lfs --depth=1
-    echo
-    
-    echo "--> Preparing local manifests directory"
-    mkdir -p .repo/local_manifests
-    
-    echo "--> Adding TrebleDroid local manifest"
-    wget -O .repo/local_manifests/treble.xml https://raw.githubusercontent.com/TrebleDroid/treble_manifest/android-16.0/replace.xml 2>/dev/null || \
-    wget -O .repo/local_manifests/treble.xml https://raw.githubusercontent.com/TrebleDroid/treble_manifest/android-15.0/replace.xml
-    
-    echo "--> Adding AxionOS local manifest"
-    cat > .repo/local_manifests/axion.xml << 'EOF'
+### Set up build environment
+echo -e "${YELLOW}Setting up build environment...${NC}"
+export ALLOW_MISSING_DEPENDENCIES=true
+export WITHOUT_CHECK_API=true
+
+### Initialize repo
+echo -e "${YELLOW}Initializing repository...${NC}"
+if [ ! -d ".repo" ]; then
+    repo init -u $MANIFEST_URL -b $MANIFEST_BRANCH --git-lfs --depth=1
+else
+    echo "Repository already initialized"
+fi
+
+### Add TrebleDroid local manifest
+echo -e "${YELLOW}Adding TrebleDroid manifests...${NC}"
+mkdir -p .repo/local_manifests
+
+cat > .repo/local_manifests/treble.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <manifest>
-  <remote name="axion"
-          fetch="https://github.com/AxionAOSP"
-          revision="lineage-23.0" />
+  <remote name="treble" fetch="https://github.com/TrebleDroid/" />
   
-  <!-- Add AxionOS specific repos here -->
-  <project path="vendor/axion" name="vendor_axion" remote="axion" />
+  <project path="device/phh/treble" name="device_phh_treble" remote="treble" revision="android-16.0" />
+  <project path="vendor/hardware_overlay" name="vendor_hardware_overlay" remote="treble" revision="android-16.0" />
+  <project path="vendor/interfaces" name="vendor_interfaces" remote="treble" revision="android-16.0" />
   
+  <!-- Remove conflicting AOSP projects -->
+  <remove-project name="platform/packages/apps/Launcher3" />
+  <remove-project name="platform/packages/apps/Settings" />
 </manifest>
 EOF
-    echo
-}
 
-syncRepos() {
-    echo "--> Syncing repos (limited to 24 jobs)"
-    repo sync -c --force-sync --no-clone-bundle --no-tags -j24
-    echo
-}
+### Sync sources
+echo -e "${YELLOW}Syncing sources (this will take a while)...${NC}"
+repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune
 
-applyPatches() {
-    # Clone patches if not present
-    if [ ! -d patches ]; then
-        echo "--> Cloning TrebleDroid patches"
-        git clone https://github.com/ponces/treble_aosp patches_repo -b android-16.0 2>/dev/null || \
-        git clone https://github.com/ponces/treble_aosp patches_repo -b android-15.0
-        if [ -d patches_repo/patches ]; then
-            cp -r patches_repo/patches .
-        fi
-    fi
-    
-    if [ -d patches ] && [ -f patches/apply-patches.sh ]; then
-        echo "--> Applying TrebleDroid patches"
-        bash patches/apply-patches.sh . trebledroid 2>/dev/null || echo "Some trebledroid patches may have failed"
-        echo
-        
-        echo "--> Applying ponces patches"
-        bash patches/apply-patches.sh . ponces 2>/dev/null || echo "Some ponces patches may have failed"
-        echo
-        
-        echo "--> Applying personal patches"
-        bash patches/apply-patches.sh . personal 2>/dev/null || echo "Some personal patches may have failed"
-        echo
-    else
-        echo "--> No patches found, skipping patch application"
-        echo
-    fi
-    
-    echo "--> Generating Treble device makefiles"
-    cd device/phh/treble
-    git clean -fdx
-    bash generate.sh
-    cd ../../..
-    echo
-}
+### Apply TrebleDroid patches
+echo -e "${YELLOW}Applying TrebleDroid patches...${NC}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-setupEnv() {
-    echo "--> Setting up build environment"
-    mkdir -p $OUTPUT_DIR
-    source build/envsetup.sh
-    echo
-    
-    # Enable ccache
-    export USE_CCACHE=1
-    export CCACHE_COMPRESS=1
-    export CCACHE_MAXSIZE=50G
-    ccache -M 50G -F 0 2>/dev/null || true
-    echo
-}
+# Clone TrebleDroid patches if not using the treble_aosp repo structure
+if [ ! -d "treble_aosp" ]; then
+    git clone https://github.com/ponces/treble_aosp -b android-16.0 treble_aosp
+fi
 
-buildTrebleApp() {
-    echo "--> Building Treble app"
-    if [ -d packages/apps/TrebleApp ]; then
-        (cd packages/apps/TrebleApp; ./gradlew assembleRelease 2>/dev/null || echo "Treble app build failed")
-    else
-        echo "TrebleApp not found, skipping"
-    fi
-    echo
-}
+# Apply patches from TrebleDroid
+if [ -d "treble_aosp/patches" ]; then
+    echo "Applying patches..."
+    bash treble_aosp/apply-patches.sh treble_aosp/patches || true
+fi
 
-buildVariant() {
-    echo "--> Building $1"
-    lunch "$1"-bp2a-userdebug
-    make -j24 installclean
-    
-    # Check if this is a GApps variant
-    if [[ "$1" == *"bg"* ]]; then
-        echo "--> Building with GApps"
-        make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$BUILD_NUMBER TARGET_BUILD_GAPPS=true -j24 systemimage
-    else
-        echo "--> Building Vanilla variant"
-        make RELAX_USES_LIBRARY_CHECK=true BUILD_NUMBER=$BUILD_NUMBER -j24 systemimage
-    fi
-    
-    make -j24 vndk-test-sepolicy
-    mv $OUT/system.img $OUTPUT_DIR/system-"$1".img
-    echo
-}
+### Set up build environment
+echo -e "${YELLOW}Setting up build environment...${NC}"
+. build/envsetup.sh
 
-buildVariants() {
-    buildVariant treble_arm64_bvN
-    buildVariant treble_arm64_bgN
-}
+### Configure for GSI build
+echo -e "${YELLOW}Configuring for arm64 GApps build...${NC}"
 
-generatePackages() {
-    echo "--> Generating compressed packages"
-    buildDate="$(date +%Y%m%d)"
-    find $OUTPUT_DIR/ -name "system-treble_*.img" | while read file; do
-        filename="$(basename $file)"
-        [[ "$filename" == *"_bvN"* ]] && variant="vanilla" || variant="gapps"
-        name="axionos-arm64-ab-${variant}-16.0-$buildDate"
-        xz -cv "$file" -T0 > $OUTPUT_DIR/"$name".img.xz
-        BUILT_FILES+=("$OUTPUT_DIR/$name.img.xz")
-    done
-    rm -rf $OUTPUT_DIR/system-*.img
-    
-    # Save manifest
-    repo manifest -r > $OUTPUT_DIR/manifest-$buildDate.xml
-    BUILT_FILES+=("$OUTPUT_DIR/manifest-$buildDate.xml")
-    echo
-}
+# Lunch command for AxionOS with GApps
+# For GSI, we use treble device configuration
+export WITH_GMS=true
+export TARGET_NO_SU=true
+export TARGET_SUPPORTS_GOOGLE_BATTERY=true
 
-uploadToGoFile() {
-    local file="$1"
-    if [ -f "$file" ]; then
-        echo "Uploading $file to GoFile..."
-        ./upload.sh "$file"
-    else
-        echo "File $file not found, skipping upload."
-    fi
-}
+# Select the appropriate treble variant for arm64
+# treble_arm64_bgN = arm64, binder64, gapps, no su
+lunch treble_arm64_bgN-ap3a-userdebug
 
-selectUploads() {
-    echo
-    echo "--------------------------------------"
-    echo " Select Files to Upload to GoFile"
-    echo "--------------------------------------"
-    
-    # Download GoFile upload script if not present
-    if [ ! -f upload.sh ]; then
-        echo "Downloading GoFile upload script..."
-        wget -q https://raw.githubusercontent.com/Sushrut1101/GoFile-Upload/refs/heads/master/upload.sh && chmod +x upload.sh
-    fi
-    
-    # List all files
-    local file_list=()
-    find $OUTPUT_DIR/ -name "*.img.xz" -o -name "manifest-*.xml" | sort | while read file; do
-        echo "$file"
-    done > /tmp/build_files.txt
-    
-    mapfile -t file_list < /tmp/build_files.txt
-    
-    for i in "${!file_list[@]}"; do
-        file="${file_list[$i]}"
-        filename=$(basename "$file")
-        filesize=$(du -h "$file" 2>/dev/null | cut -f1 || echo "N/A")
-        echo "[$((i+1))] $filename ($filesize)"
-    done
-    
-    echo
-    echo "Options:"
-    echo "  [a] Upload all files"
-    echo "  [n] Upload none (skip upload)"
-    echo "  [1-${#file_list[@]}] Upload specific file numbers (space-separated)"
-    echo
-    read -p "Enter your choice: " choice
-    
-    case "$choice" in
-        a|A)
-            echo
-            echo "Uploading all files to GoFile..."
-            for file in "${file_list[@]}"; do
-                uploadToGoFile "$file"
-            done
-            ;;
-        n|N)
-            echo
-            echo "Skipping upload. Files saved locally in: $OUTPUT_DIR/"
-            ;;
-        *)
-            echo
-            echo "Uploading selected files..."
-            for num in $choice; do
-                if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le "${#file_list[@]}" ]; then
-                    uploadToGoFile "${file_list[$((num-1))]}"
-                else
-                    echo "Invalid selection: $num (skipped)"
-                fi
-            done
-            ;;
-    esac
-    
-    echo
-}
+### Build GSI
+echo -e "${YELLOW}Starting build process...${NC}"
+echo -e "${YELLOW}Building for: arm64 with GApps and no root${NC}"
 
-# Main execution
-START=$(date +%s)
+# Build system image
+make -j$(nproc --all) systemimage
 
-initRepos
-syncRepos
-applyPatches
-setupEnv
-buildTrebleApp
-buildVariants
-generatePackages
-selectUploads
+### Package the GSI
+echo -e "${YELLOW}Packaging GSI image...${NC}"
+BUILD_DATE=$(date +%Y%m%d)
+OUTPUT_DIR="$PWD/release/AxionOS-16.0-$BUILD_DATE"
+mkdir -p "$OUTPUT_DIR"
 
-END=$(date +%s)
-ELAPSEDM=$(($(($END-$START))/60))
-ELAPSEDS=$(($(($END-$START))-$ELAPSEDM*60))
+# Find the built system image
+SYSTEM_IMG=$(find out/target/product/tdgsi_arm64_ab -name "system.img" 2>/dev/null | head -1)
 
-echo "--------------------------------------"
-echo " Buildbot completed in $ELAPSEDM minutes and $ELAPSEDS seconds"
-echo "--------------------------------------"
-echo
-echo "Output files in: $OUTPUT_DIR/"
-echo "--------------------------------------"
+if [ -f "$SYSTEM_IMG" ]; then
+    # Compress the system image
+    echo -e "${YELLOW}Compressing system image...${NC}"
+    xz -z -T0 -v "$SYSTEM_IMG" -c > "$OUTPUT_DIR/AxionOS-16.0-arm64-ab-gapps-nosu-$BUILD_DATE.img.xz"
+    
+    # Generate checksums
+    cd "$OUTPUT_DIR"
+    sha256sum *.img.xz > sha256sum.txt
+    
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}Build completed successfully!${NC}"
+    echo -e "${GREEN}Output: $OUTPUT_DIR${NC}"
+    echo -e "${GREEN}========================================${NC}"
+else
+    echo -e "${RED}Error: System image not found!${NC}"
+    exit 1
+fi
